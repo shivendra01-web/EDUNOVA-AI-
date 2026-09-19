@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from flask import Flask
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from app.extensions import csrf, db, login_manager
 from config import Config
@@ -23,8 +26,6 @@ def create_app(config_object=None) -> Flask:
     _register_blueprints(app)
     _register_user_loader()
 
-    # Import models so metadata is registered, then create tables.
-    # Use importlib so we do not shadow the local Flask `app` variable.
     import importlib
 
     importlib.import_module("app.models")
@@ -39,8 +40,7 @@ def create_app(config_object=None) -> Flask:
             )
 
             ensure_extra_columns(db)
-            # Presentation-ready: empty DB + DEMO_MODE seeds catalog automatically.
-            # Skip under pytest (TestConfig uses in-memory DB and seeds its own fixtures).
+
             if (
                 app.config.get("DEMO_MODE")
                 and not app.config.get("TESTING")
@@ -59,19 +59,16 @@ def _register_error_handlers(app: Flask) -> None:
     @app.errorhandler(403)
     def forbidden(e):
         from flask import render_template
-
         return render_template("errors/403.html"), 403
 
     @app.errorhandler(404)
     def not_found(e):
         from flask import render_template
-
         return render_template("errors/404.html"), 404
 
     @app.errorhandler(500)
     def server_error(e):
         from flask import render_template
-
         return render_template("errors/500.html"), 500
 
 
@@ -113,14 +110,17 @@ def _register_blueprints(app: Flask) -> None:
         ("app.routes.api", "bp", "/api"),
         ("app.routes.main", "bp", None),
     )
+
     for module_name, attr, url_prefix in blueprint_specs:
         try:
             module = __import__(module_name, fromlist=[attr])
         except ImportError:
             continue
+
         bp = getattr(module, attr, None)
         if bp is None:
             continue
+
         if url_prefix:
             app.register_blueprint(bp, url_prefix=url_prefix)
         else:

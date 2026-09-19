@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+
+from groq import Groq
 import urllib.error
 import urllib.request
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -177,6 +179,71 @@ class GeminiProvider:
             raise RuntimeError(f"Unexpected Gemini response: {data}") from exc
 
 
+
+class GroqProvider:
+    """Groq Chat Completions provider using the official Groq SDK."""
+
+    name = "groq"
+
+    def __init__(self, api_key: str, model: str | None = None) -> None:
+        self.api_key = (api_key or "").strip()
+        self.model = (model or "").strip() or "llama-3.3-70b-versatile"
+
+    def complete(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        context: Mapping[str, Any] | None = None,
+    ) -> str:
+        if not self.api_key:
+            raise RuntimeError(
+                "GroqProvider requires AI_API_KEY. "
+                "Set AI_API_KEY and AI_PROVIDER=groq."
+            )
+
+        context_text = _format_context(context)
+
+        system_prompt = system or (
+            "You are EduNova AI, an educational and career guidance assistant. "
+            "Give accurate, practical, student-friendly answers. "
+            "Do not invent facts. If something is uncertain, say so."
+        )
+
+        if context_text:
+            system_prompt = (
+                f"{system_prompt}\n\n"
+                f"Additional EduNova student context:\n{context_text}"
+            )
+
+        try:
+            client = Groq(api_key=self.api_key)
+
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                temperature=0.3,
+            )
+
+            content = response.choices[0].message.content
+
+            if not content:
+                raise RuntimeError("Groq returned an empty response.")
+
+            return str(content).strip()
+
+        except Exception as exc:
+            raise RuntimeError(f"Groq API error: {exc}") from exc
+
 class OpenAIProvider:
     """OpenAI Chat Completions REST stub — requires AI_API_KEY."""
 
@@ -235,7 +302,7 @@ class OpenAIProvider:
 
 
 def get_ai_provider(app_config: Mapping[str, Any]) -> AIProvider:
-    """Factory: local | gemini | openai from app config."""
+    """Factory: local | gemini | openai | groq from app config."""
     provider = str(app_config.get("AI_PROVIDER", "local") or "local").strip().lower()
     api_key = str(app_config.get("AI_API_KEY", "") or "")
     model = str(app_config.get("AI_MODEL", "") or "") or None
@@ -246,7 +313,11 @@ def get_ai_provider(app_config: Mapping[str, Any]) -> AIProvider:
         return GeminiProvider(api_key=api_key, model=model)
     if provider in {"openai", "gpt"}:
         return OpenAIProvider(api_key=api_key, model=model)
+    if provider == "groq":
+        return GroqProvider(api_key=api_key, model=model)
 
     raise ValueError(
-        f"Unknown AI_PROVIDER={provider!r}. Use local, gemini, or openai."
+        f"Unknown AI_PROVIDER={provider!r}. Use local, gemini, openai, or groq."
     )
+
+
