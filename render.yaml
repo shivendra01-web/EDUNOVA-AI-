@@ -5,15 +5,26 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt && python ml/datasets/generate_dataset.py && python -m ml.training.train_placement && python scripts/seed_demo_data.py
     startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /api/health
     envVars:
       - key: SECRET_KEY
         generateValue: true
       - key: DEMO_MODE
         value: "true"
       - key: AI_PROVIDER
-        value: local
+        value: groq
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: FLASK_DEBUG
         value: "false"
+      - key: FLASK_ENV
+        value: production
       - key: SESSION_COOKIE_SECURE
         value: "true"
       - key: DATABASE_URL

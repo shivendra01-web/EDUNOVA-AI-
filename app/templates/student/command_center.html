@@ -1,0 +1,119 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Career Command Center — EDUNOVA AI{% endblock %}
+
+{% block content %}
+{% set state = center.current_state if center else {} %}
+{% set briefing = center.daily_briefing if center else none %}
+
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Action Plan</p>
+    <h1>AI Career Command Center</h1>
+    <p>One place for readiness, gaps, and next actions — grounded in your saved profile.</p>
+  </div>
+  <div class="btn-group">
+    <a href="{{ url_for('student.coach') }}" class="btn btn-ai">Ask AI Coach</a>
+    <a href="{{ url_for('student.roadmap') }}" class="btn btn-glass">Roadmap</a>
+  </div>
+</div>
+
+{% if center and center.disclaimer %}
+<p class="text-muted mb-2" style="font-size:0.85rem;">{{ center.disclaimer }}</p>
+{% endif %}
+
+<div class="grid grid-4 mb-2">
+  <article class="glass-card stat-card">
+    <div class="stat-label">Readiness</div>
+    <div class="stat-value">{{ '%.0f'|format(state.readiness) if state.readiness is not none else '—' }}</div>
+  </article>
+  <article class="glass-card stat-card">
+    <div class="stat-label">Intelligence</div>
+    <div class="stat-value text-primary">{{ '%.0f'|format(state.intelligence_score) if state.intelligence_score is not none else '—' }}</div>
+  </article>
+  <article class="glass-card stat-card">
+    <div class="stat-label">Target role</div>
+    <div class="stat-value" style="font-size:1.1rem;">{{ state.target_role or '—' }}</div>
+    {% if state.match_pct is not none %}<span class="badge badge-ai mt-1">{{ '%.0f'|format(state.match_pct) }}% fit</span>{% endif %}
+  </article>
+  <article class="glass-card stat-card">
+    <div class="stat-label">Roadmap</div>
+    <div class="stat-value">{{ '%.0f'|format(state.roadmap_progress) if state.roadmap_progress is not none else '—' }}{% if state.roadmap_progress is not none %}%{% endif %}</div>
+  </article>
+</div>
+
+{% if briefing %}
+<article class="glass-card mb-2">
+  <div class="card-header"><h3>AI Daily Briefing</h3><span class="badge badge-ai">Deterministic</span></div>
+  <ul>
+    <li><strong>Today’s priority:</strong> {{ briefing.today_priority }}</li>
+    <li><strong>Skill to practice:</strong> {{ briefing.skill_to_practice }}</li>
+    <li><strong>Interview focus:</strong> {{ briefing.interview_question }}</li>
+    <li><strong>Roadmap task:</strong> {{ briefing.roadmap_task }}</li>
+    <li><strong>Profile improvement:</strong> {{ briefing.profile_improvement }}</li>
+  </ul>
+</article>
+{% endif %}
+
+<div class="grid grid-2 mb-2">
+  <article class="glass-card">
+    <div class="card-header"><h3>AI priorities</h3></div>
+    {% if center.ai_priorities %}
+      <ol>
+        {% for a in center.ai_priorities[:3] %}
+          <li class="mb-1">
+            <strong>{{ a.title }}</strong>
+            <div class="text-muted" style="font-size:0.85rem;">{{ a.reason }}</div>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <div class="empty-state"><p>Add skills and a preferred role to unlock priorities.</p></div>
+    {% endif %}
+  </article>
+  <article class="glass-card">
+    <div class="card-header"><h3>Career gap</h3></div>
+    {% if center.career_gap %}
+      <p><strong>{{ center.career_gap.skill }}</strong></p>
+      <p style="font-size:0.9rem;">{{ center.career_gap.why }}</p>
+      <a href="{{ url_for('student.skill_prioritizer') }}" class="btn btn-sm btn-glass">Skill Prioritizer</a>
+    {% else %}
+      <div class="empty-state"><p>No major catalog gap detected yet.</p></div>
+    {% endif %}
+  </article>
+</div>
+
+<div class="grid grid-3 mb-2">
+  <article class="glass-card">
+    <h3 class="mb-1">Project</h3>
+    <p style="font-size:0.9rem;">{{ center.project_recommendation }}</p>
+    <a href="{{ url_for('student.project_architect') }}" class="btn btn-sm btn-ai mt-1">Project Architect</a>
+  </article>
+  <article class="glass-card">
+    <h3 class="mb-1">Interview</h3>
+    <p style="font-size:0.9rem;">{{ center.interview_recommendation }}</p>
+    <a href="{{ url_for('student.interview') }}" class="btn btn-sm btn-glass mt-1">Interview Lab</a>
+  </article>
+  <article class="glass-card">
+    <h3 class="mb-1">Resume</h3>
+    <p style="font-size:0.9rem;">{{ center.resume_recommendation }}</p>
+    <a href="{{ url_for('student.resume') }}" class="btn btn-sm btn-glass mt-1">Resume Analyzer</a>
+  </article>
+</div>
+
+<article class="glass-card mb-2">
+  <div class="card-header"><h3>Weekly action plan</h3></div>
+  {% if center.weekly_action_plan %}
+    <ul>
+      {% for w in center.weekly_action_plan %}
+        <li class="mb-1"><strong>{{ w.day_band }}:</strong> {{ w.task }}
+          {% if w.reason %}<span class="text-muted"> — {{ w.reason }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="empty-state"><p>Complete onboarding to generate a weekly plan.</p></div>
+  {% endif %}
+  <a href="{{ url_for('student.study_planner') }}" class="btn btn-ai mt-1">Open Study Planner</a>
+</article>
+{% endblock %}

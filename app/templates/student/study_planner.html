@@ -1,0 +1,85 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}AI Study Planner — EDUNOVA AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Action Plan</p>
+    <h1>AI Personal Study Planner</h1>
+    <p>Realistic weekly schedule from skill gaps, capacity, and your target role.</p>
+  </div>
+  <a href="{{ url_for('student.learning') }}" class="btn btn-glass">Learning Hub</a>
+</div>
+
+<article class="glass-card mb-2">
+  <form method="post" data-loading>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grid grid-3">
+      <div class="form-group">
+        <label class="form-label" for="role_id">Target role</label>
+        <select class="form-control" name="role_id" id="role_id">
+          <option value="">Auto (top career match)</option>
+          {% for r in roles %}
+            <option value="{{ r.id }}" {% if selected_role_id == r.id %}selected{% endif %}>{{ r.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="hours_per_day">Hours / day</label>
+        <input class="form-control" type="number" min="1" max="8" name="hours_per_day" id="hours_per_day" value="{{ hours_per_day|default(2) }}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="days_per_week">Days / week</label>
+        <input class="form-control" type="number" min="3" max="7" name="days_per_week" id="days_per_week" value="{{ days_per_week|default(5) }}">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-ai" name="generate" value="1">Generate study plan</button>
+  </form>
+</article>
+
+{% if plan and plan.ok %}
+<article class="glass-card mb-2">
+  <div class="card-header">
+    <h3>{{ plan.goal }}</h3>
+    <span class="badge badge-ai">{{ plan.hours_per_day }}h × {{ plan.days_per_week }}d</span>
+  </div>
+  {% if plan.disclaimer %}<p class="text-muted" style="font-size:0.85rem;">{{ plan.disclaimer }}</p>{% endif %}
+
+  {% if plan.days %}
+  <div class="grid grid-2 mt-2">
+    {% for day in plan.days %}
+      <div class="glass-card" style="box-shadow:none;">
+        <h3 class="mb-1">{{ day.day }}</h3>
+        <ul>
+          {% for s in day.sessions %}
+            <li>{{ s.skill }} — {{ s.minutes }} min <span class="badge">{{ s.kind }}</span></li>
+          {% endfor %}
+        </ul>
+        <p class="text-muted" style="font-size:0.8rem;">Total ~{{ day.total_minutes }} min</p>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if plan.weeks %}
+  <h3 class="mt-2 mb-1">4-week overview</h3>
+  <ol>
+    {% for w in plan.weeks %}
+      <li class="mb-1"><strong>Week {{ w.week }} ({{ w.theme }}):</strong> {{ w.focus_skill }} · ~{{ w.estimated_hours }}h</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+</article>
+{% elif plan and not plan.ok %}
+<article class="glass-card empty-state">
+  <h3>Choose a target role</h3>
+  <p>{{ plan.goal }}</p>
+</article>
+{% else %}
+<article class="glass-card empty-state">
+  <h3>No plan yet</h3>
+  <p>Select capacity and generate a schedule grounded in your skill gaps.</p>
+</article>
+{% endif %}
+{% endblock %}

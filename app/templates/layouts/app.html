@@ -24,6 +24,7 @@
       <div class="nav-section">
         <div class="nav-section-label">Overview</div>
         {{ nav_link('student.dashboard', 'Dashboard', '▣') }}
+        {{ nav_link('student.command_center', 'Command Center', '✦') }}
         {{ nav_link('student.profile', 'Profile', '◎') }}
       </div>
 
@@ -40,6 +41,7 @@
         <div class="nav-section-label">Analysis Lab</div>
         {{ nav_link('student.analytics', 'Analytics Lab', '▥') }}
         {{ nav_link('student.skill_gap', 'Skill Gap', '⬡') }}
+        {{ nav_link('student.skill_prioritizer', 'Skill Prioritizer', '⬆') }}
         {{ nav_link('student.resume', 'Resume Analyzer', '▤') }}
         {{ nav_link('intelligence.jd_analyzer', 'JD Analyzer', '▤') }}
         {{ nav_link('intelligence.compare_careers', 'Career Comparison', '◇') }}
@@ -52,9 +54,10 @@
       <div class="nav-section">
         <div class="nav-section-label">Action Plan</div>
         {{ nav_link('student.roadmap', 'Roadmap', '⇢') }}
-        {{ nav_link('student.learning', 'Learning Plan', '▤') }}
+        {{ nav_link('student.learning', 'Learning Plan', '▤', also=['student.study_planner']) }}
+        {{ nav_link('student.study_planner', 'Study Planner', '📅') }}
+        {{ nav_link('student.project_architect', 'Project Architect', '🏗') }}
         {{ nav_link('student.projects', 'Projects', '▣') }}
-        {{ nav_link('student.projects', 'Certifications / Experience', '◎') }}
         {{ nav_link('intelligence.intelligence_score', 'Intelligence Score', '✦') }}
       </div>
 
@@ -112,4 +115,8 @@
     </main>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {% block page_scripts %}{% endblock %}
 {% endblock %}

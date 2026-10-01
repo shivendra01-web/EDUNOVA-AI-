@@ -1,0 +1,101 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}AI Project Architect — EDUNOVA AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Action Plan</p>
+    <h1>AI Project Architect</h1>
+    <p>Project blueprints grounded in your skills and documented gaps — never invented experience.</p>
+  </div>
+  <a href="{{ url_for('student.projects') }}" class="btn btn-glass">My projects</a>
+</div>
+
+<article class="glass-card mb-2">
+  <form method="post" data-loading>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label class="form-label" for="target_role">Target role</label>
+      <input class="form-control" type="text" name="target_role" id="target_role"
+             value="{{ target_role }}" placeholder="e.g. Data Analyst (optional — uses top match)">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="interests">Optional interests</label>
+      <input class="form-control" type="text" name="interests" id="interests"
+             value="{{ interests }}" placeholder="e.g. education analytics, campus apps">
+    </div>
+    <button type="submit" class="btn btn-ai">Generate blueprint</button>
+  </form>
+</article>
+
+{% if blueprint and blueprint.ok %}
+<article class="glass-card mb-2">
+  <div class="card-header">
+    <h3>{{ blueprint.title }}</h3>
+    <span class="badge badge-ai">{{ blueprint.source|default('deterministic') }}</span>
+  </div>
+  {% if blueprint.disclaimer %}<p class="text-muted" style="font-size:0.85rem;">{{ blueprint.disclaimer }}</p>{% endif %}
+  {% if blueprint.status_message %}<p class="badge mb-1">{{ blueprint.status_message }}</p>{% endif %}
+
+  <h3 class="mt-2">Problem</h3>
+  <p>{{ blueprint.problem_statement }}</p>
+  <h3>Why it matters</h3>
+  <p>{{ blueprint.why_it_matters }}</p>
+
+  <h3>Recommended stack</h3>
+  <p>{% for t in blueprint.tech_stack %}<span class="badge mr-1">{{ t }}</span>{% else %}—{% endfor %}</p>
+
+  <div class="grid grid-2 mt-2">
+    <div>
+      <h3>Architecture</h3>
+      <ul>{% for a in blueprint.architecture %}<li>{{ a }}</li>{% endfor %}</ul>
+      <h3>Database</h3>
+      <ul>{% for d in blueprint.database_design %}<li>{{ d }}</li>{% endfor %}</ul>
+    </div>
+    <div>
+      <h3>API plan</h3>
+      <ul>{% for a in blueprint.api_plan %}<li><code>{{ a }}</code></li>{% endfor %}</ul>
+      <h3>ML / AI component</h3>
+      <p style="font-size:0.9rem;">{{ blueprint.ml_component }}</p>
+    </div>
+  </div>
+
+  <h3 class="mt-2">Milestones</h3>
+  <ol>
+    {% for m in blueprint.milestones %}
+      <li>Week {{ m.week }}: {{ m.goal }}</li>
+    {% endfor %}
+  </ol>
+
+  <h3>Testing</h3>
+  <ul>{% for t in blueprint.testing_plan %}<li>{{ t }}</li>{% endfor %}</ul>
+  <h3>Deployment</h3>
+  <ul>{% for d in blueprint.deployment_plan %}<li>{{ d }}</li>{% endfor %}</ul>
+
+  <h3>Resume bullet suggestions</h3>
+  <p class="text-muted" style="font-size:0.85rem;">Suggestions only — claim only work you actually complete.</p>
+  <ul>
+    {% for b in blueprint.resume_bullet_suggestions %}
+      <li>{{ b.text if b is mapping else b }} <span class="badge">suggestion</span></li>
+    {% endfor %}
+  </ul>
+
+  {% if blueprint.ai_narrative %}
+  <h3 class="mt-2">AI refinement</h3>
+  <div class="coach-bubble assistant ai-structured">
+    {% if blueprint.ai_narrative_html %}
+      {{ blueprint.ai_narrative_html|safe }}
+    {% else %}
+      {{ blueprint.ai_narrative }}
+    {% endif %}
+  </div>
+  {% endif %}
+</article>
+{% else %}
+<article class="glass-card empty-state">
+  <h3>Generate a blueprint</h3>
+  <p>Uses your saved skills and catalog gaps. Groq refines when configured; otherwise a deterministic plan is shown.</p>
+</article>
+{% endif %}
+{% endblock %}

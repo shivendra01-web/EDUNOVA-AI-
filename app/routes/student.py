@@ -24,7 +24,10 @@ from app.extensions import db
 from app.forms import (
     AddStudentSkillForm,
     AddTrackedCompanyForm,
+    CertificationForm,
     CoachForm,
+    GitHubProjectForm,
+    InternshipForm,
     InterviewAnswerForm,
     InterviewStartForm,
     JDMatchForm,
@@ -189,6 +192,7 @@ def dashboard():
         intelligence_score=intelligence_score,
         biggest_gap=biggest_gap,
         next_actions=next_actions,
+        career_snapshot=(intel or {}).get("career_snapshot"),
         dash=intel,
         opportunities=(intel or {}).get("opportunities") or [],
         history=(intel or {}).get("history") or {},
@@ -306,9 +310,9 @@ def profile():
     form = ProfileForm()
     skill_form = AddStudentSkillForm()
 
-    if request.args.get("remove_skill"):
+    if request.method == "POST" and "remove_skill" in request.form:
         try:
-            sid = int(request.args.get("remove_skill"))
+            sid = int(request.form.get("skill_id") or 0)
         except (TypeError, ValueError):
             sid = None
         if sid:
@@ -516,7 +520,7 @@ def skill_gap():
         if role_id:
             try:
                 analysis = skill_gap_svc.gaps_for_role_id(profile, int(role_id))
-                role = CareerRole.query.get(int(role_id))
+                role = db.session.get(CareerRole, int(role_id))
                 if role is not None:
                     matrix = skill_gap_svc.skill_gap_matrix(profile, role)
                 form.role_id.data = int(role_id)
@@ -540,19 +544,39 @@ def roadmap():
     task_form = TaskStatusForm()
     roles = CareerRole.query.order_by(CareerRole.name).all()
 
-    if gen_form.validate_on_submit() and "generate" in request.form:
+    if gen_form.validate_on_submit() and (
+        "generate" in request.form or "regenerate" in request.form
+    ):
         role = db.session.get(CareerRole, gen_form.role_id.data)
         if role is None:
             flash("Role not found.", "danger")
         else:
-            rm = roadmap_svc.generate_roadmap(profile, role, replace_existing=True)
-            flash(f"Roadmap generated: {rm.title}", "success")
+            # Preserve progress unless the student explicitly regenerates.
+            force = "regenerate" in request.form
+            existing = (
+                LearningRoadmap.query.filter_by(student_id=profile.id, role_id=role.id)
+                .order_by(LearningRoadmap.updated_at.desc())
+                .first()
+            )
+            rm = roadmap_svc.generate_roadmap(
+                profile, role, replace_existing=force
+            )
+            if existing and not force and rm.id == existing.id:
+                flash(
+                    f"Showing your existing roadmap for {role.name} "
+                    "(progress preserved). Use Regenerate to rebuild from current gaps.",
+                    "info",
+                )
+            else:
+                flash(f"Roadmap generated: {rm.title}", "success")
             return redirect(url_for("student.roadmap", roadmap_id=rm.id))
 
     if task_form.validate_on_submit() and "update_task" in request.form:
         try:
             task = roadmap_svc.set_task_status(
-                task_form.task_id.data, task_form.status.data
+                task_form.task_id.data,
+                task_form.status.data,
+                student_id=profile.id,
             )
             flash(f"Task updated: {task.title}", "success")
             return redirect(
@@ -613,7 +637,7 @@ def resume():
                 file_ext=ext,
             )
             db.session.add(resume_row)
-            db.session.commit()
+            db.session.flush()
             analysis = resume_svc.analyze_resume(resume_row, path)
             flash(
                 f"Resume analyzed — completeness {analysis.completeness_score:.0f}/100.",
@@ -621,7 +645,16 @@ def resume():
             )
             jd_form.resume_id.data = resume_row.id
         except ValueError as exc:
+            db.session.rollback()
             flash(str(exc), "danger")
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
+            current_app.logger.exception("Resume upload/analysis failed")
+            flash(
+                "Something went wrong while analyzing your resume. "
+                "Your profile was not changed — please try another file.",
+                "danger",
+            )
 
     if jd_form.validate_on_submit() and "match" in request.form:
         resume_row = db.session.get(Resume, jd_form.resume_id.data)
@@ -700,28 +733,40 @@ def interview():
     if answer_form.validate_on_submit() and "answer" in request.form:
         try:
             interview_svc.submit_answer(
-                answer_form.question_id.data, answer_form.answer_text.data
+                answer_form.question_id.data,
+                answer_form.answer_text.data,
+                student_id=profile.id,
             )
             flash("Answer submitted and scored.", "success")
             q = db.session.get(InterviewQuestion, answer_form.question_id.data)
             sid = q.session_id if q else request.args.get("session_id", type=int)
             return redirect(url_for("student.interview", session_id=sid))
+        except PermissionError:
+            flash("You can only answer questions in your own interview session.", "danger")
         except ValueError as exc:
             flash(str(exc), "danger")
 
     session_id = request.args.get("session_id", type=int)
     detail = None
     if session_id:
-        sess = db.session.get(InterviewSession, session_id)
-        if sess and sess.student_id == profile.id:
-            detail = interview_svc.session_detail(session_id)
+        try:
+            detail = interview_svc.session_detail(session_id, student_id=profile.id)
+        except PermissionError:
+            flash("Interview not found.", "danger")
+            detail = None
+        except ValueError:
+            flash("Interview not found.", "danger")
+            detail = None
 
     if request.method == "POST" and "complete" in request.form and session_id:
-        sess = db.session.get(InterviewSession, session_id)
-        if sess and sess.student_id == profile.id:
-            interview_svc.complete_session(session_id)
+        try:
+            interview_svc.complete_session(session_id, student_id=profile.id)
             flash("Interview completed.", "success")
             return redirect(url_for("student.interview_results", session_id=session_id))
+        except PermissionError:
+            flash("You can only complete your own interview session.", "danger")
+        except ValueError as exc:
+            flash(str(exc), "danger")
 
     past = (
         InterviewSession.query.filter_by(student_id=profile.id)
@@ -743,12 +788,15 @@ def interview():
 @student_required
 def interview_results(session_id: int):
     profile = ensure_student_profile()
-    sess = db.session.get(InterviewSession, session_id)
-    if sess is None or sess.student_id != profile.id:
+    try:
+        detail = interview_svc.session_detail(session_id, student_id=profile.id)
+    except (PermissionError, ValueError):
         flash("Interview not found.", "danger")
         return redirect(url_for("student.interview"))
-    detail = interview_svc.session_detail(session_id)
-    followup = interview_svc.coaching_followup(sess) if sess.status == "completed" else None
+    sess = db.session.get(InterviewSession, session_id)
+    followup = None
+    if sess and sess.status == "completed":
+        followup = interview_svc.coaching_followup(sess)
     return render_template(
         "student/interview_results.html",
         detail=detail,
@@ -762,37 +810,62 @@ def interview_results(session_id: int):
 def coach():
     profile = ensure_student_profile()
     form = CoachForm()
-    reply = None
     if request.method == "POST" and "clear" in request.form:
         n = coach_svc.clear_conversation(profile)
         flash(f"Cleared {n} conversation messages.", "success")
         return redirect(url_for("student.coach"))
     if form.validate_on_submit():
         result = coach_svc.ask_coach(profile, form.message.data)
-        reply = result["reply"]
-        flash(f"Coach replied via {result['provider']}.", "info")
-        form.message.data = ""
-    history = (
+        if result.get("fallback_used") and result.get("status_message"):
+            flash(result["status_message"], "warning")
+        else:
+            flash(f"Coach replied via {result.get('provider', 'AI')}.", "info")
+        return redirect(url_for("student.coach"))
+    # Quick-prompt buttons post message directly
+    if request.method == "POST" and request.form.get("quick_prompt"):
+        result = coach_svc.ask_coach(profile, request.form.get("quick_prompt"))
+        if result.get("fallback_used") and result.get("status_message"):
+            flash(result["status_message"], "warning")
+        else:
+            flash(f"Coach replied via {result.get('provider', 'AI')}.", "info")
+        return redirect(url_for("student.coach"))
+    history_rows = (
         AIConversation.query.filter_by(student_id=profile.id)
         .order_by(AIConversation.created_at.desc())
         .limit(40)
         .all()
     )
-    history = list(reversed(history))
+    history_rows = list(reversed(history_rows))
+    from app.ai.response import markdown_to_safe_html
+
+    history = [
+        {
+            "role": m.role,
+            "message": m.message,
+            "message_html": markdown_to_safe_html(m.message)
+            if m.role == "assistant"
+            else None,
+        }
+        for m in history_rows
+    ]
     quick_prompts = [
         "What should I learn next?",
-        "Am I ready for a Data Analyst role?",
-        "Why is my readiness score what it is?",
-        "Which company should I target next?",
-        "How can I improve my resume?",
+        "Why should I learn that?",
+        "Give me a 30 day plan.",
+        "What project should I build?",
+        "What skills am I missing?",
+        "How can I improve my placement readiness?",
+        "Prepare me for technical interview",
+        "Which companies should I target?",
     ]
     return render_template(
         "student/coach.html",
         form=form,
         history=history,
-        reply=reply,
         profile=profile,
         quick_prompts=quick_prompts,
+        provider_label=coach_svc.provider_display_name(),
+        ai_provider=str(current_app.config.get("AI_PROVIDER", "local")),
     )
 
 
@@ -801,19 +874,138 @@ def coach():
 def projects():
     profile = ensure_student_profile()
     form = ProjectForm()
-    if form.validate_on_submit():
+    github_form = GitHubProjectForm()
+    cert_form = CertificationForm()
+    intern_form = InternshipForm()
+
+    if request.method == "POST" and "analyze_github" in request.form:
+        if github_form.validate_on_submit():
+            from app.services.github_project import (
+                GitHubAnalysisError,
+                analyze_github_repository,
+                apply_analysis_to_project_fields,
+            )
+
+            try:
+                analysis = analyze_github_repository(github_form.github_url.data)
+                fields = apply_analysis_to_project_fields(analysis)
+                project = Project(
+                    student_id=profile.id,
+                    title=fields["title"],
+                    description=fields["description"],
+                    tech_stack=fields["tech_stack"],
+                    role=(github_form.role.data or "").strip() or None,
+                    url=fields["url"],
+                    analysis_json=fields["analysis_json"],
+                    analysis_status="analyzed",
+                )
+                db.session.add(project)
+                db.session.commit()
+                flash(
+                    f"GitHub project analyzed: {project.title}. Evidence saved to your profile.",
+                    "success",
+                )
+                return redirect(url_for("student.projects"))
+            except GitHubAnalysisError as exc:
+                flash(str(exc), "danger")
+            except Exception:
+                current_app.logger.exception("GitHub project analysis failed")
+                flash(
+                    "GitHub repository could not be accessed. Please check that "
+                    "the repository is public and the URL is correct.",
+                    "danger",
+                )
+        else:
+            flash("Enter a valid public GitHub repository URL.", "warning")
+
+    elif (
+        form.validate_on_submit()
+        and "add_cert" not in request.form
+        and "add_intern" not in request.form
+    ):
+        title = (form.title.data or "").strip()
+        url = (form.url.data or "").strip()
+        if not title and url:
+            # Convenience: treat URL-only submissions as GitHub analyze when possible.
+            from app.services.github_project import (
+                GitHubAnalysisError,
+                analyze_github_repository,
+                apply_analysis_to_project_fields,
+                parse_github_url,
+            )
+
+            try:
+                parse_github_url(url)
+                analysis = analyze_github_repository(url)
+                fields = apply_analysis_to_project_fields(analysis)
+                db.session.add(
+                    Project(
+                        student_id=profile.id,
+                        title=fields["title"],
+                        description=fields["description"] or form.description.data,
+                        tech_stack=fields["tech_stack"] or form.tech_stack.data,
+                        role=(form.role.data or "").strip() or None,
+                        url=fields["url"],
+                        analysis_json=fields["analysis_json"],
+                        analysis_status="analyzed",
+                    )
+                )
+                db.session.commit()
+                flash("GitHub URL detected and analyzed.", "success")
+                return redirect(url_for("student.projects"))
+            except GitHubAnalysisError as exc:
+                flash(str(exc), "danger")
+                return redirect(url_for("student.projects"))
+            except Exception:
+                current_app.logger.exception("GitHub analyze-from-url failed")
+                flash("Could not analyze GitHub URL. Saved as a manual project instead.", "warning")
+                title = title or "GitHub Project"
+
+        if not title:
+            flash("Project title is required (or provide a GitHub URL to analyze).", "danger")
+        else:
+            db.session.add(
+                Project(
+                    student_id=profile.id,
+                    title=title,
+                    description=form.description.data,
+                    tech_stack=form.tech_stack.data,
+                    role=form.role.data,
+                    url=form.url.data,
+                    analysis_status="manual",
+                )
+            )
+            db.session.commit()
+            flash("Project added.", "success")
+            return redirect(url_for("student.projects"))
+
+    if cert_form.validate_on_submit() and "add_cert" in request.form:
         db.session.add(
-            Project(
+            Certification(
                 student_id=profile.id,
-                title=form.title.data.strip(),
-                description=form.description.data,
-                tech_stack=form.tech_stack.data,
-                role=form.role.data,
-                url=form.url.data,
+                name=cert_form.name.data.strip(),
+                issuer=(cert_form.issuer.data or "").strip() or None,
+                credential_id=(cert_form.credential_id.data or "").strip() or None,
+                url=(cert_form.url.data or "").strip() or None,
             )
         )
         db.session.commit()
-        flash("Project added.", "success")
+        flash("Certification added to your profile.", "success")
+        return redirect(url_for("student.projects"))
+
+    if intern_form.validate_on_submit() and "add_intern" in request.form:
+        db.session.add(
+            Internship(
+                student_id=profile.id,
+                company=intern_form.company.data.strip(),
+                title=intern_form.title.data.strip(),
+                description=(intern_form.description.data or "").strip() or None,
+                location=(intern_form.location.data or "").strip() or None,
+                is_current=bool(intern_form.is_current.data),
+            )
+        )
+        db.session.commit()
+        flash("Internship added to your profile.", "success")
         return redirect(url_for("student.projects"))
 
     items = (
@@ -823,20 +1015,56 @@ def projects():
     )
     certs = Certification.query.filter_by(student_id=profile.id).all()
     interns = Internship.query.filter_by(student_id=profile.id).all()
-    # Catalog recommendations from career role descriptions.
     role_recs = CareerRole.query.order_by(CareerRole.name).limit(5).all()
+
+    mentor_reports: dict[int, dict] = {}
+    mentor_narratives: dict[int, str] = {}
+    try:
+        from app.services.project_mentor import mentor_project
+
+        for p in items:
+            mentor_reports[p.id] = mentor_project(p, profile)
+    except Exception:  # noqa: BLE001
+        mentor_reports = {}
+
+    mentor_id = request.args.get("mentor", type=int)
+    if mentor_id and mentor_id in mentor_reports:
+        try:
+            from app.services.ai_insights import generate_narrative
+            from app.services.coach import build_student_context
+
+            report = mentor_reports[mentor_id]
+            prompt = (
+                "Act as a project mentor. Using ONLY this evidence, give concise improvement advice. "
+                f"Title: {report.get('title')}. Strengths: {report.get('strengths')}. "
+                f"Weaknesses: {report.get('weaknesses')}. "
+                "Do not invent features that are not listed."
+            )
+            narrative = generate_narrative(
+                prompt, context=build_student_context(profile)
+            )
+            mentor_narratives[mentor_id] = narrative.get("reply_html") or ""
+        except Exception:  # noqa: BLE001
+            pass
+
     return render_template(
         "student/projects.html",
         form=form,
+        github_form=github_form,
+        cert_form=cert_form,
+        intern_form=intern_form,
         projects=items,
         certifications=certs,
         internships=interns,
         role_recs=role_recs,
         profile=profile,
+        mentor_reports=mentor_reports,
+        mentor_narratives=mentor_narratives,
+        active_mentor_id=mentor_id,
     )
 
 
-@bp.route("/learning")
+@bp.route("/learning", methods=["GET", "POST"])
 @student_required
 def learning():
     profile = ensure_student_profile()
@@ -854,11 +1082,42 @@ def learning():
         )
         .count()
     )
+    plan = None
+    narrative_html = None
+    roles = CareerRole.query.order_by(CareerRole.name).all()
+    selected_role_id = request.values.get("role_id", type=int)
+
+    if request.method == "POST" or request.args.get("generate") == "1":
+        from app.services.learning_planner import build_learning_plan
+
+        role = db.session.get(CareerRole, selected_role_id) if selected_role_id else None
+        plan = build_learning_plan(profile, role, weeks=4)
+        try:
+            from app.services.ai_insights import generate_narrative
+            from app.services.coach import build_student_context
+
+            gaps = ", ".join(plan.get("gaps") or []) or "none listed"
+            prompt = (
+                "Write a short motivational learning overview for this 4-week educational plan. "
+                f"Goal: {plan.get('goal')}. Skill gaps to close: {gaps}. "
+                "Keep it under 180 words. Do not invent certifications or experience."
+            )
+            narrative = generate_narrative(
+                prompt, context=build_student_context(profile)
+            )
+            narrative_html = narrative.get("reply_html")
+        except Exception:  # noqa: BLE001
+            narrative_html = None
+
     return render_template(
         "student/learning.html",
         roadmaps=maps,
         tasks_done=tasks_done,
         profile=profile,
+        plan=plan,
+        narrative_html=narrative_html,
+        roles=roles,
+        selected_role_id=selected_role_id,
     )
 
 
@@ -1071,6 +1330,114 @@ def report():
         mimetype="application/pdf",
         as_attachment=True,
         download_name="edunova_career_intelligence_report.pdf",
+    )
+
+
+@bp.route("/command-center")
+@student_required
+def command_center():
+    """AI Career Command Center — aggregates existing intelligence."""
+    profile = ensure_student_profile()
+    try:
+        from app.services.command_center import build_command_center
+
+        center = build_command_center(profile)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("Command Center failed")
+        center = {
+            "current_state": {},
+            "ai_priorities": [],
+            "career_gap": None,
+            "project_recommendation": "Complete your profile to unlock recommendations.",
+            "interview_recommendation": "Start a mock interview after adding skills.",
+            "resume_recommendation": "Upload a resume when ready.",
+            "weekly_action_plan": [],
+            "daily_briefing": None,
+            "disclaimer": "Unable to load full intelligence — try refreshing after profile updates.",
+            "source": "fallback",
+        }
+    return render_template(
+        "student/command_center.html",
+        profile=profile,
+        center=center,
+    )
+
+
+@bp.route("/study-planner", methods=["GET", "POST"])
+@student_required
+def study_planner():
+    """AI Personal Study Planner — day schedule from skill gaps + capacity."""
+    profile = ensure_student_profile()
+    roles = CareerRole.query.order_by(CareerRole.name).all()
+    selected_role_id = request.values.get("role_id", type=int)
+    hours = request.values.get("hours_per_day", type=int) or 2
+    days = request.values.get("days_per_week", type=int) or 5
+    plan = None
+    if request.method == "POST" or request.args.get("generate") == "1":
+        from app.services.learning_planner import build_learning_plan
+
+        role = db.session.get(CareerRole, selected_role_id) if selected_role_id else None
+        plan = build_learning_plan(
+            profile, role, weeks=4, hours_per_day=hours, days_per_week=days
+        )
+    return render_template(
+        "student/study_planner.html",
+        profile=profile,
+        roles=roles,
+        selected_role_id=selected_role_id,
+        hours_per_day=hours,
+        days_per_week=days,
+        plan=plan,
+    )
+
+
+@bp.route("/skill-prioritizer", methods=["GET", "POST"])
+@student_required
+def skill_prioritizer():
+    """Explainable HIGH / MEDIUM / LOW skill priorities."""
+    profile = ensure_student_profile()
+    roles = CareerRole.query.order_by(CareerRole.name).all()
+    selected_role_id = request.values.get("role_id", type=int)
+    from app.services.skill_prioritizer import prioritize_skills
+
+    role = db.session.get(CareerRole, selected_role_id) if selected_role_id else None
+    result = prioritize_skills(profile, role)
+    return render_template(
+        "student/skill_prioritizer.html",
+        profile=profile,
+        roles=roles,
+        selected_role_id=selected_role_id,
+        result=result,
+    )
+
+
+@bp.route("/project-architect", methods=["GET", "POST"])
+@student_required
+def project_architect():
+    """AI Project Architect — blueprint from real profile skills/gaps."""
+    profile = ensure_student_profile()
+    blueprint = None
+    target_role = (request.values.get("target_role") or "").strip()
+    interests = (request.values.get("interests") or "").strip()
+    if request.method == "POST":
+        from app.services.project_architect import architect_project
+
+        try:
+            blueprint = architect_project(
+                profile, target_role=target_role or None, interests=interests or None
+            )
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception("Project Architect failed")
+            flash(
+                "Could not generate a blueprint right now. Please try again.",
+                "danger",
+            )
+    return render_template(
+        "student/project_architect.html",
+        profile=profile,
+        blueprint=blueprint,
+        target_role=target_role,
+        interests=interests,
     )
 
 

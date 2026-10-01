@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from app.models import CareerRole, PredictionRecord, ProgressRecord
@@ -148,13 +148,72 @@ def coach_json():
         return jsonify({"error": "coach service not available"}), 503
     try:
         result = coach_svc.ask_coach(profile, message)
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": "Coach could not answer right now.", "detail": str(exc)[:160]}), 500
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("API coach failed")
+        return jsonify({"error": "Coach could not answer right now."}), 500
     if isinstance(result, dict):
-        return jsonify(result)
+        # Never return internal exception detail; keep presentation fields only
+        return jsonify(
+            {
+                "provider": result.get("provider"),
+                "reply": result.get("reply"),
+                "reply_html": result.get("reply_html"),
+                "fallback_used": result.get("fallback_used"),
+                "status_message": result.get("status_message"),
+            }
+        )
     return jsonify({"reply": str(result)})
 
 
 @bp.route("/health")
 def health():
-    return jsonify({"status": "ok", "service": "edunova-ai", "legacy": "nexora-ai"})
+    """Public health — no secrets. Distinguishes AI configured vs unavailable."""
+    from app.services.healthcheck import run_health_checks
+
+    try:
+        report = run_health_checks()
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("Health check failed")
+        return jsonify(
+            {
+                "status": "degraded",
+                "service": "edunova-ai",
+                "legacy": "nexora-ai",
+                "ok": False,
+                "database": "unknown",
+                "ai": {"configured": False, "available": True},
+            }
+        ), 503
+
+    db_ok = next(
+        (c["ok"] for c in report.get("checks", []) if c.get("name") == "database"),
+        False,
+    )
+    ai_check = next(
+        (c for c in report.get("checks", []) if c.get("name") == "ai_provider"),
+        {},
+    )
+    ml_ok = next(
+        (c["ok"] for c in report.get("checks", []) if c.get("name") == "ml_model"),
+        False,
+    )
+    provider = report.get("provider") or "local"
+    key_set = "key=set" in str(ai_check.get("detail") or "")
+    ai_configured = (provider == "local") or key_set or bool(ai_check.get("ok"))
+    # App is healthy for Render if DB responds; AI/ML are soft status fields.
+    payload = {
+        "status": "ok" if db_ok else "degraded",
+        "service": "edunova-ai",
+        "legacy": "nexora-ai",
+        "ok": bool(db_ok),
+        "database": "connected" if db_ok else "error",
+        "ml_model": "present" if ml_ok else "missing",
+        "ai": {
+            "provider": provider,
+            "configured": bool(ai_configured),
+            "available": True,  # local fallback always keeps features usable
+            "detail": ai_check.get("detail") if isinstance(ai_check, dict) else None,
+        },
+        "demo_mode": bool(report.get("demo_mode")),
+    }
+    return jsonify(payload), (200 if db_ok else 503)

@@ -1,4 +1,5 @@
 {% extends "layouts/app.html" %}
+{% from "components/form_errors.html" import form_errors %}
 
 {% block title %}Resume Intelligence — EDUNOVA AI{% endblock %}
 
@@ -22,6 +23,7 @@
     <div class="card-header"><h3>Upload resume</h3></div>
     <form method="post" enctype="multipart/form-data" data-loading>
       {{ upload_form.hidden_tag() }}
+      {{ form_errors(upload_form) }}
       <div class="form-group">
         {{ upload_form.resume.label(class_="form-label") }}
         {{ upload_form.resume(class_="form-control") }}
@@ -35,6 +37,7 @@
     <div class="card-header"><h3>Match a job description</h3></div>
     <form method="post" data-loading>
       {{ jd_form.hidden_tag() }}
+      {{ form_errors(jd_form) }}
       <div class="form-group">
         {{ jd_form.title.label(class_="form-label") }}
         {{ jd_form.title(class_="form-control") }}
@@ -54,6 +57,18 @@
       <div class="card-footer">
         <div class="stat-label">Latest match score</div>
         <div class="stat-value text-primary">{{ '%.0f'|format(match.match_score) }}%</div>
+        {% set matched = parse_json(match.matched_skills, []) %}
+        {% set missing = parse_json(match.missing_skills, []) %}
+        {% if matched %}
+          <p class="mb-0 mt-1" style="font-size:0.85rem;"><strong>Matched:</strong>
+            {% for s in matched[:8] %}{{ s if s is string else (s.name or s) }}{% if not loop.last %}, {% endif %}{% endfor %}
+          </p>
+        {% endif %}
+        {% if missing %}
+          <p class="mb-0 mt-1" style="font-size:0.85rem;"><strong>Missing:</strong>
+            {% for s in missing[:8] %}{{ s if s is string else (s.name or s) }}{% if not loop.last %}, {% endif %}{% endfor %}
+          </p>
+        {% endif %}
       </div>
     {% endif %}
   </article>
@@ -90,6 +105,18 @@
     </div>
   </div>
 </article>
+<article class="glass-card mb-2">
+  <div class="card-header"><h3>Resume → Career Roadmap</h3></div>
+  <p style="font-size:0.9rem;">
+    Your resume currently demonstrates the skills detected above.
+    Generate a personalized roadmap from your target role and skill gaps — EduNova will not invent experience.
+  </p>
+  <div class="btn-group">
+    <a href="{{ url_for('student.roadmap') }}" class="btn btn-ai">Generate roadmap</a>
+    <a href="{{ url_for('student.skill_prioritizer') }}" class="btn btn-glass">Prioritize skills</a>
+    <a href="{{ url_for('student.skill_gap') }}" class="btn btn-glass">View skill gap</a>
+  </div>
+</article>
 {% endif %}
 <div class="grid grid-3 mb-2">
   <article class="glass-card stat-card">
@@ -112,7 +139,7 @@
     <div class="card-header"><h3>Detected skills</h3></div>
     {% if skills_found %}
       {% for s in skills_found %}
-        <span class="skill-pill gap-have">{{ s.name if s.name is defined else s.get('name', s) }}</span>
+        <span class="skill-pill gap-have">{% if s is mapping %}{{ s.name or s.skill or s.skill_name or s }}{% elif s is string %}{{ s }}{% else %}{{ s }}{% endif %}</span>
       {% endfor %}
     {% else %}
       <p class="text-muted mb-0">No catalog skills matched yet.</p>
@@ -143,6 +170,17 @@
     {% endif %}
   </article>
 </div>
+
+{% if suggestions %}
+<article class="glass-card mb-2">
+  <div class="card-header"><h3>Improvement suggestions</h3></div>
+  <ul class="action-list">
+    {% for tip in suggestions %}
+      <li><span class="step">{{ loop.index }}</span><div>{{ tip if tip is string else tip }}</div></li>
+    {% endfor %}
+  </ul>
+</article>
+{% endif %}
 {% elif resumes %}
 <article class="glass-card">
   <div class="card-header"><h3>Uploaded resumes</h3></div>

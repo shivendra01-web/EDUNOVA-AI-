@@ -1,5 +1,6 @@
 {% extends "layouts/app.html" %}
 {% from "components/evidence_badge.html" import compat_note %}
+{% from "components/form_errors.html" import form_errors %}
 
 {% block title %}Company Comparison — EDUNOVA AI{% endblock %}
 
@@ -10,7 +11,7 @@
   <div>
     <p class="eyebrow">Analysis Lab</p>
     <h1>Company Comparison</h1>
-    <p>Compare how your profile aligns with two companies' educational requirement maps.</p>
+    <p>Compare how your profile aligns with two companies’ educational requirement maps.</p>
   </div>
 </div>
 
@@ -19,425 +20,106 @@
 <article class="glass-card mt-2">
   <form method="post" data-loading>
     {{ form.hidden_tag() }}
-
-```
-<div class="grid grid-2">
-  <div class="form-group">
-    <label class="form-label" for="company_id_a">Company A</label>
-    <select name="company_id_a" id="company_id_a" class="form-control" required>
-      <option value="">Select…</option>
-      {% for c in companies %}
-        <option value="{{ c.id }}" {% if form.company_id_a.data == c.id %}selected{% endif %}>
-          {{ c.name }}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-
-  <div class="form-group">
-    <label class="form-label" for="company_id_b">Company B</label>
-    <select name="company_id_b" id="company_id_b" class="form-control" required>
-      <option value="">Select…</option>
-      {% for c in companies %}
-        <option value="{{ c.id }}" {% if form.company_id_b.data == c.id %}selected{% endif %}>
-          {{ c.name }}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-</div>
-
-{{ form.submit(class_="btn btn-ai") }}
-```
-
+    {{ form_errors(form) }}
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label class="form-label" for="company_id_a">Company A</label>
+        <select name="company_id_a" id="company_id_a" class="form-control" required>
+          <option value="">Select…</option>
+          {% for c in companies %}
+            <option value="{{ c.id }}" {% if form.company_id_a.data == c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="company_id_b">Company B</label>
+        <select name="company_id_b" id="company_id_b" class="form-control" required>
+          <option value="">Select…</option>
+          {% for c in companies %}
+            <option value="{{ c.id }}" {% if form.company_id_b.data == c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    {{ form.submit(class_="btn btn-ai") }}
   </form>
 </article>
 
-{% if comparison %}
-
-<!-- Comparison Summary -->
-
+{% if comparison and comparison.error %}
 <article class="glass-card mt-2">
-  <div>
-    <p class="eyebrow">Profile Analysis</p>
-    <h2>Your Company Comparison</h2>
-    <p>
-      This comparison shows how your current profile aligns with the selected companies.
-    </p>
-  </div>
-
-{% if comparison.delta_fit_pct is defined %} <div class="mt-2"> <strong>Profile-fit difference:</strong>
-{{ comparison.delta_fit_pct }} percentage points </div>
-{% endif %}
-
-{% if comparison.better_current_fit %} <div class="mt-1"> <strong>Current profile-fit result:</strong>
-Based on the current profile-fit calculation, the higher current fit is <strong>{{ comparison.better_current_fit }}</strong>. </div>
-{% endif %}
-
+  <p class="mb-0">We could not compare those companies. Please select two valid companies from the list.</p>
 </article>
+{% elif comparison %}
+{% set a = comparison.company_a %}
+{% set b = comparison.company_b %}
 
-<!-- Company Cards -->
+{% if comparison.summary %}
+<article class="glass-card mt-2">
+  <div class="card-header"><h3>Comparison summary</h3></div>
+  <p class="mb-0">{{ comparison.summary }}</p>
+  {% if comparison.better_current_fit %}
+    <p class="mt-1 mb-0"><span class="badge badge-ai">Stronger current fit: {{ comparison.better_current_fit }}</span></p>
+  {% endif %}
+  {% if comparison.compared_role_name %}
+    <p class="form-hint mt-1 mb-0">Compared using role: {{ comparison.compared_role_name }}</p>
+  {% endif %}
+</article>
+{% endif %}
 
 <div class="grid grid-2 mt-2">
-
-{% set company = comparison.company_a %}
-
+  {% for side in [a, b] %}
   <article class="glass-card">
-
-```
-<p class="eyebrow">Company A</p>
-
-{% if company.company_name %}
-  <h2>{{ company.company_name }}</h2>
-{% endif %}
-
-{% if company.company_type %}
-  <p>{{ company.company_type }}</p>
-{% endif %}
-
-{% if company.fit_pct is defined %}
-  <div class="mt-2">
-    <strong>Profile Fit</strong>
-    <div style="font-size:2rem;font-weight:700;margin-top:.35rem;">
-      {{ company.fit_pct }}%
+    <div class="card-header">
+      <div>
+        <h3 class="mb-0">{{ side.company_name }}</h3>
+        {% if side.company_type %}<p class="mb-0 text-muted" style="font-size:0.85rem;">{{ side.company_type }}</p>{% endif %}
+      </div>
+      <span class="badge badge-ai">{{ side.label or 'Fit' }}</span>
     </div>
-  </div>
-{% endif %}
+    <div class="stat-value text-primary">{{ '%.0f'|format(side.fit_pct or 0) }}%</div>
+    <p class="form-hint mb-2">Calculated educational fit</p>
 
-{% if company.label %}
-  <p class="mt-1">
-    <strong>Fit:</strong> {{ company.label }}
-  </p>
-{% endif %}
+    {% if side.role_name %}
+      <p><strong>Role:</strong> {{ side.role_name }}</p>
+    {% endif %}
 
-{% if company.role_name %}
-  <p class="mt-1">
-    <strong>Relevant Role:</strong> {{ company.role_name }}
-  </p>
-{% endif %}
+    {% if side.matching_skills %}
+      <p class="mb-1" style="font-size:0.85rem;"><strong>Matching skills</strong></p>
+      <div class="mb-2">
+        {% for s in side.matching_skills %}
+          <span class="skill-pill">{{ s }}</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-muted" style="font-size:0.85rem;">No matching skills recorded yet for this comparison.</p>
+    {% endif %}
 
-{% if company.missing_count is defined %}
-  <p class="mt-1">
-    <strong>Missing Skills:</strong> {{ company.missing_count }}
-  </p>
-{% endif %}
+    {% if side.missing_skills %}
+      <p class="mb-1" style="font-size:0.85rem;"><strong>Missing / below-target skills</strong></p>
+      <div class="mb-2">
+        {% for s in side.missing_skills %}
+          <span class="skill-pill gap-missing">{{ s }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
 
-{% if company.missing_skills %}
-  <div class="mt-2">
-    <strong>Skills to Develop</strong>
+    {% if side.relevant_requirements %}
+      <p class="mb-1" style="font-size:0.85rem;"><strong>Relevant requirements</strong></p>
+      <ul class="action-list">
+        {% for req in side.relevant_requirements[:6] %}
+          <li><span class="step">◇</span><div>{{ req }}</div></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
 
-    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem;">
-      {% for skill in company.missing_skills %}
-        <span class="badge" style="display:inline-flex;align-items:center;white-space:nowrap;margin:.15rem;">
-  {{ skill }}
-</span>
-      {% endfor %}
-    </div>
-  </div>
-{% endif %}
-
-{% if company.careers_url %}
-  <div class="mt-2">
-    <a
-      href="{{ company.careers_url }}"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="btn btn-ai"
-    >
-      View Careers
-    </a>
-  </div>
-{% endif %}
-```
-
+    {% if side.career_notes %}
+      <p class="mt-2 mb-0" style="font-size:0.85rem;">{{ side.career_notes }}</p>
+    {% endif %}
+    {% if side.careers_url %}
+      <a class="btn btn-sm btn-glass mt-2" href="{{ side.careers_url }}" target="_blank" rel="noopener">Careers page</a>
+    {% endif %}
   </article>
-
-{% set company = comparison.company_b %}
-
-  <article class="glass-card">
-
-```
-<p class="eyebrow">Company B</p>
-
-{% if company.company_name %}
-  <h2>{{ company.company_name }}</h2>
-{% endif %}
-
-{% if company.company_type %}
-  <p>{{ company.company_type }}</p>
-{% endif %}
-
-{% if company.fit_pct is defined %}
-  <div class="mt-2">
-    <strong>Profile Fit</strong>
-    <div style="font-size:2rem;font-weight:700;margin-top:.35rem;">
-      {{ company.fit_pct }}%
-    </div>
-  </div>
-{% endif %}
-
-{% if company.label %}
-  <p class="mt-1">
-    <strong>Fit:</strong> {{ company.label }}
-  </p>
-{% endif %}
-
-{% if company.role_name %}
-  <p class="mt-1">
-    <strong>Relevant Role:</strong> {{ company.role_name }}
-  </p>
-{% endif %}
-
-{% if company.missing_count is defined %}
-  <p class="mt-1">
-    <strong>Missing Skills:</strong> {{ company.missing_count }}
-  </p>
-{% endif %}
-
-{% if company.missing_skills %}
-  <div class="mt-2">
-    <strong>Skills to Develop</strong>
-
-    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem;">
-      {% for skill in company.missing_skills %}
-        <span class="badge" style="display:inline-flex;align-items:center;white-space:nowrap;margin:.15rem;">
-  {{ skill }}
-</span>
-      {% endfor %}
-    </div>
-  </div>
-{% endif %}
-
-{% if company.careers_url %}
-  <div class="mt-2">
-    <a
-      href="{{ company.careers_url }}"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="btn btn-ai"
-    >
-      View Careers
-    </a>
-  </div>
-{% endif %}
-```
-
-  </article>
-
+  {% endfor %}
 </div>
-
-<!-- Detailed Analysis -->
-
-{% if comparison.detail_a %}
-
-<article class="glass-card mt-2">
-  <p class="eyebrow">Detailed Analysis</p>
-
-{% if comparison.company_a.company_name %} <h2>{{ comparison.company_a.company_name }}</h2>
-{% endif %}
-
-{% if comparison.detail_a is mapping %}
-
-```
-{% for key, value in comparison.detail_a.items() %}
-
-  {% if value is not none and value != "" and value != [] and value != {} %}
-
-    <div class="mt-2">
-      <strong>{{ key|replace("_", " ")|title }}</strong>
-
-      {% if value is string %}
-        <p>{{ value }}</p>
-
-        {% elif value is iterable and value is not string and value is not mapping %}
-  {% if key == "missing_skills" %}
-    <div style="display:flex;flex-direction:column;gap:.75rem;margin-top:.75rem;">
-      {% for item in value %}
-        {% if item is mapping %}
-          <div class="glass-card" style="padding:1rem;">
-            {% if item.skill_name %}
-              <strong>{{ item.skill_name }}</strong>
-            {% endif %}
-
-            <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;">
-              {% if item.required_level is defined %}
-                <span class="badge">Required: {{ item.required_level }}</span>
-              {% endif %}
-
-              {% if item.current_level is defined %}
-                <span class="badge">Current: {{ item.current_level }}</span>
-              {% endif %}
-
-              {% if item.gap is defined %}
-                <span class="badge">Gap: {{ item.gap }}</span>
-              {% endif %}
-
-              {% if item.importance %}
-                <span class="badge">{{ item.importance|title }}</span>
-              {% endif %}
-            </div>
-          </div>
-        {% else %}
-          <div class="glass-card" style="padding:1rem;">
-            {{ item }}
-          </div>
-        {% endif %}
-      {% endfor %}
-    </div>
-  {% else %}
-    <ul>
-      {% for item in value %}
-        <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-  {% endif %}
-
-      {% elif value is mapping %}
-        <ul>
-          {% for nested_key, nested_value in value.items() %}
-            {% if nested_value is not none and nested_value != "" %}
-              <li>
-                <strong>{{ nested_key|replace("_", " ")|title }}:</strong>
-                {{ nested_value }}
-              </li>
-            {% endif %}
-          {% endfor %}
-        </ul>
-
-      {% else %}
-        <p>{{ value }}</p>
-      {% endif %}
-    </div>
-
-  {% endif %}
-
-{% endfor %}
-```
-
-{% else %} <p>{{ comparison.detail_a }}</p>
-{% endif %}
-
-</article>
-{% endif %}
-
-{% if comparison.detail_b %}
-
-<article class="glass-card mt-2">
-  <p class="eyebrow">Detailed Analysis</p>
-
-{% if comparison.company_b.company_name %} <h2>{{ comparison.company_b.company_name }}</h2>
-{% endif %}
-
-{% if comparison.detail_b is mapping %}
-
-```
-{% for key, value in comparison.detail_b.items() %}
-
-  {% if value is not none and value != "" and value != [] and value != {} %}
-
-    <div class="mt-2">
-      <strong>{{ key|replace("_", " ")|title }}</strong>
-
-      {% if value is string %}
-        <p>{{ value }}</p>
-
-      {% elif value is iterable and value is not string and value is not mapping %}
-  {% if key == "missing_skills" %}
-    <div style="display:flex;flex-direction:column;gap:.75rem;margin-top:.75rem;">
-      {% for item in value %}
-        {% if item is mapping %}
-          <div class="glass-card" style="padding:1rem;">
-            {% if item.skill_name %}
-              <strong>{{ item.skill_name }}</strong>
-            {% endif %}
-
-            <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;">
-              {% if item.required_level is defined %}
-                <span class="badge">
-                  Required: {{ item.required_level }}
-                </span>
-              {% endif %}
-
-              {% if item.current_level is defined %}
-                <span class="badge">
-                  Current: {{ item.current_level }}
-                </span>
-              {% endif %}
-
-              {% if item.gap is defined %}
-                <span class="badge">
-                  Gap: {{ item.gap }}
-                </span>
-              {% endif %}
-
-              {% if item.importance %}
-                <span class="badge">
-                  {{ item.importance|title }}
-                </span>
-              {% endif %}
-            </div>
-          </div>
-        {% else %}
-          <div class="glass-card" style="padding:1rem;">
-            {{ item }}
-          </div>
-        {% endif %}
-      {% endfor %}
-    </div>
-  {% else %}
-    <ul>
-      {% for item in value %}
-        <li>
-          {% if item is mapping %}
-            {% for nested_key, nested_value in item.items() %}
-              {% if nested_value is not none and nested_value != "" %}
-                <strong>{{ nested_key|replace("_", " ")|title }}:</strong>
-                {{ nested_value }}
-                {% if not loop.last %} · {% endif %}
-              {% endif %}
-            {% endfor %}
-          {% else %}
-            {{ item }}
-          {% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-  {% endif %}
-
-      {% elif value is mapping %}
-        <ul>
-          {% for nested_key, nested_value in value.items() %}
-            {% if nested_value is not none and nested_value != "" %}
-              <li>
-                <strong>{{ nested_key|replace("_", " ")|title }}:</strong>
-                {{ nested_value }}
-              </li>
-            {% endif %}
-          {% endfor %}
-        </ul>
-
-      {% else %}
-        <p>{{ value }}</p>
-      {% endif %}
-    </div>
-
-  {% endif %}
-
-{% endfor %}
-```
-
-{% else %} <p>{{ comparison.detail_b }}</p>
-{% endif %}
-
-</article>
-{% endif %}
-
-{% if comparison.disclaimer %}
-
-  <article class="glass-card mt-2">
-    <p>{{ comparison.disclaimer }}</p>
-  </article>
-{% endif %}
-
 {% endif %}
 {% endblock %}

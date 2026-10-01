@@ -1,0 +1,69 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}AI Skill Prioritizer — EDUNOVA AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Analysis Lab</p>
+    <h1>AI Skill Prioritizer</h1>
+    <p>Explainable HIGH / MEDIUM / LOW priorities from role importance, gap size, and evidence.</p>
+  </div>
+  <a href="{{ url_for('student.skill_gap') }}" class="btn btn-glass">Skill Gap</a>
+</div>
+
+<article class="glass-card mb-2">
+  <form method="get" data-loading>
+    <div class="form-group">
+      <label class="form-label" for="role_id">Target role</label>
+      <select class="form-control" name="role_id" id="role_id">
+        <option value="">Auto (top career match)</option>
+        {% for r in roles %}
+          <option value="{{ r.id }}" {% if selected_role_id == r.id %}selected{% endif %}>{{ r.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-ai" name="analyze" value="1">Prioritize skills</button>
+  </form>
+</article>
+
+{% if result and result.ok %}
+<p class="text-muted mb-2" style="font-size:0.85rem;">{{ result.disclaimer }} · Role: <strong>{{ result.role_name }}</strong>
+  {% if result.coverage_pct is not none %}· Coverage {{ '%.0f'|format(result.coverage_pct) }}%{% endif %}
+</p>
+
+{% macro priority_list(items, label, badge) -%}
+<article class="glass-card mb-2">
+  <div class="card-header"><h3>{{ label }}</h3><span class="badge {{ badge }}">{{ items|length }}</span></div>
+  {% if items %}
+    <ul>
+      {% for row in items %}
+        <li class="mb-2">
+          <strong>{{ row.skill_name }}</strong>
+          <span class="badge">L{{ row.current_level }}/{{ row.required_level }}</span>
+          <div style="font-size:0.85rem;">{{ row.why }}</div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="empty-state"><p>None in this band.</p></div>
+  {% endif %}
+</article>
+{%- endmacro %}
+
+{{ priority_list(result.high, 'HIGH PRIORITY', 'badge-ai') }}
+{{ priority_list(result.medium, 'MEDIUM PRIORITY', 'badge') }}
+{{ priority_list(result.low, 'LOW PRIORITY', 'badge') }}
+
+{% elif result and not result.ok %}
+<article class="glass-card empty-state">
+  <h3>Need a target role</h3>
+  <p>{{ result.disclaimer }}</p>
+</article>
+{% else %}
+<article class="glass-card empty-state">
+  <h3>Run prioritization</h3>
+  <p>Select a role (or auto-match) to see explainable skill priorities.</p>
+</article>
+{% endif %}
+{% endblock %}
